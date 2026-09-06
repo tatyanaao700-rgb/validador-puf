@@ -40,7 +40,7 @@ def processar_validacao(img_orig_path, img_teste_np):
     img2 = cv2.cvtColor(img_teste_np, cv2.COLOR_RGB2GRAY)
     
     # Processo de extração de características AKAZE (visão computacional)
-    akaze = cv2.AKAZE_create()
+    akaze = cv2.ORB_create()
     kp1, des1 = akaze.detectAndCompute(img1, None)
     kp2, des2 = akaze.detectAndCompute(img2, None)
     
