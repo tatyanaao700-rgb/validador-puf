@@ -1,5 +1,4 @@
 import os
-import tempfile
 import cv2
 import numpy as np
 import streamlit as st
@@ -11,101 +10,46 @@ st.set_page_config(
 )
 
 
-# 2. Funções auxiliares de processamento de imagem e vídeo dinâmico
-def recortar_centro(img_np):
-  """Recorta os 60% centrais da imagem para focar no selo e eliminar bordas/fundo indesejado."""
-  h, w, _ = img_np.shape
-  margem_h = int(h * 0.2)
-  margem_w = int(w * 0.2)
-  recorte = img_np[margem_h : h - margem_h, margem_w : w - margem_w]
-  return recorte
+# 2. Função auxiliar de processamento de imagem
+def processar_validacao(img_orig_path, img_teste_np):
+    img1 = cv2.imread(img_orig_path, cv2.IMREAD_GRAYSCALE)
+    if img1 is None or img_teste_np is None:
+        return 0, 0, 0.0, "Erro de processamento: Não foi possível carregar as imagens."
 
+    img2 = cv2.cvtColor(img_teste_np, cv2.COLOR_RGB2GRAY)
 
-def processar_validacao_frame(img_orig_path, img_teste_np):
-  img1 = cv2.imread(img_orig_path, cv2.IMREAD_GRAYSCALE)
-  if img1 is None or img_teste_np is None:
-    return 0, 0, 0.0, "Erro de processamento"
+    # Utilizando ORB para detecção de características
+    orb = cv2.ORB_create()
+    kp1, des1 = orb.detectAndCompute(img1, None)
+    kp2, des2 = orb.detectAndCompute(img2, None)
 
-  img2 = cv2.cvtColor(img_teste_np, cv2.COLOR_RGB2GRAY)
+    if des1 is None or des2 is None or len(des1) < 2 or len(des2) < 2:
+        return 0, 0, 0.0, "ALERTA! Poucos pontos encontrados ou imagem fora de foco."
 
-  orb = cv2.ORB_create()
-  kp1, des1 = orb.detectAndCompute(img1, None)
-  kp2, des2 = orb.detectAndCompute(img2, None)
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING)
+    matches = bf.knnMatch(des1, des2, k=2)
 
-  if des1 is None or des2 is None or len(des1) < 2 or len(des2) < 2:
-    return 0, 0, 0.0, "Poucos pontos"
+    bons = [m for m, n in matches if m.distance < 0.75 * n.distance]
+    total_possivel = max(len(kp1), len(kp2), 1)
+    correlacao = (len(bons) / total_possivel) * 100
 
-  bf = cv2.BFMatcher(cv2.NORM_HAMMING)
-  matches = bf.knnMatch(des1, des2, k=2)
-
-  bons = [m for m, n in matches if m.distance < 0.75 * n.distance]
-  total_possivel = max(len(kp1), len(kp2), 1)
-  correlacao = (len(bons) / total_possivel) * 100
-
-  status = (
-      "SELO ORIGINAL (Autêntico)"
-      if correlacao > 15
-      else "ALERTA! SELO ADULTERADO OU FALSIFICADO"
-  )
-  return len(bons), total_possivel, correlacao, status
-
-
-def processar_validacao_video(img_orig_path, arquivo_video):
-  tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-  tfile.write(arquivo_video.read())
-  video_path = tfile.name
-
-  cap = cv2.VideoCapture(video_path)
-  melhor_correlacao = 0.0
-  melhor_inliers = 0
-  melhor_total = 0
-  status_final = "ALERTA! SELO ADULTERADO OU FALSIFICADO"
-
-  frame_count = 0
-  while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-      break
-
-    # Analisa a cada 3 quadros para manter o processamento fluido e rápido
-    frame_count += 1
-    if frame_count % 3 != 0:
-      continue
-
-    # Converte BGR do OpenCV para RGB e aplica o recorte central automático
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    frame_processado = recortar_centro(frame_rgb)
-
-    inliers, total, correlacao, status = processar_validacao_frame(
-        img_orig_path, frame_processado
+    status = (
+        "SELO ORIGINAL (Autêntico)"
+        if correlacao > 15
+        else "ALERTA! SELO ADULTERADO OU FALSIFICADO"
     )
-
-    if correlacao > melhor_correlacao:
-      melhor_correlacao = correlacao
-      melhor_inliers = inliers
-      melhor_total = total
-      if "ORIGINAL" in status:
-        status_final = status
-
-  cap.release()
-  try:
-    os.unlink(video_path)
-  except:
-    pass
-
-  return melhor_inliers, melhor_total, melhor_correlacao, status_final
+    return len(bons), total_possivel, correlacao, status
 
 
 # 3. Interface Visual e Configurações de Barra Lateral
-st.title("🛡️ Validador Dinâmico de Relevo UV (PUF)")
+st.title("🛡️ Validador de Relevo UV (PUF)")
 st.write(
-    "Sistema avançado de autenticação de selos baseados em micro-relevos de"
-    " impressão UV com compensação dinâmica de luz."
+    "Sistema de autenticação de selos físicos exclusivos baseados em micro-relevos de impressão UV."
 )
 
 PASTA_ORIGINAIS = "selos_originais"
 if not os.path.exists(PASTA_ORIGINAIS):
-  os.makedirs(PASTA_ORIGINAIS)
+    os.makedirs(PASTA_ORIGINAIS)
 
 arquivos_originais = [
     f
@@ -115,52 +59,47 @@ arquivos_originais = [
 
 st.sidebar.header("Configuração do Servidor")
 if arquivos_originais:
-  selo_escolhido = st.sidebar.selectbox(
-      "Selecione o Selo de Referência (Original):", arquivos_originais
-  )
-  caminho_original = os.path.join(PASTA_ORIGINAIS, selo_escolhido)
+    selo_escolhido = st.sidebar.selectbox(
+        "Selecione o Selo de Referência (Original):", arquivos_originais
+    )
+    caminho_original = os.path.join(PASTA_ORIGINAIS, selo_escolhido)
 else:
-  st.sidebar.warning(
-      f"A pasta '{PASTA_ORIGINAIS}' está vazia. Adicione a foto do selo"
-      " original nela."
-  )
-  caminho_original = None
+    st.sidebar.warning(
+        f"A pasta '{PASTA_ORIGINAIS}' está vazia. Adicione a foto do selo original nela."
+    )
+    caminho_original = None
 
-# 4. Seção de Envio de Vídeo e Execução da Auditoria
-st.write("### Envie um mini-vídeo do selo em movimento")
-st.info(
-    "💡 **Dica de uso:** Grave um vídeo rápido (2 a 3 segundos) passando o"
-    " celular suavemente sobre o selo. O algoritmo vai varrer os quadros e"
-    " encontrar o momento ideal onde o reflexo cruza perfeitamente o relevo."
-)
+# 4. Seção de Envio de Imagem e Execução da Auditoria
+st.write("### Envie a foto tirada pelo celular para validação")
 
 arquivo_upload = st.file_uploader(
-    "Escolha o arquivo de vídeo (MP4, MOV ou AVI)", type=["mp4", "mov", "avi"]
+    "Escolha a foto do selo de teste (JPG ou PNG)", type=["jpg", "jpeg", "png"]
 )
 
 if arquivo_upload is not None and caminho_original:
-  st.video(arquivo_upload)
+    image = Image.open(arquivo_upload)
+    st.image(image, caption="Foto enviada do celular para auditoria", use_container_width=True)
 
-  if st.button("Executar Auditoria Dinâmica por Vídeo"):
-    with st.spinner("Analisando quadros e varrendo os micro-relevos PUF..."):
-      inliers, total, correlacao, status = processar_validacao_video(
-          caminho_original, arquivo_upload
-      )
+    if st.button("Executar Auditoria de Relevo"):
+        with st.spinner("Analisando micro-relevos tridimensionais..."):
+            img_np = np.array(image)
+            inliers, total, correlacao, status = processar_validacao(
+                caminho_original, img_np
+            )
 
-      st.divider()
-      st.subheader("Resultado da Auditoria:")
+            st.divider()
+            st.subheader("Resultado da Auditoria:")
 
-      if "ORIGINAL" in status:
-        st.success(f"**STATUS:** {status}")
-      else:
-        st.error(f"**STATUS:** {status}")
+            if "ORIGINAL" in status:
+                st.success(f"**STATUS:** {status}")
+            else:
+                st.error(f"**STATUS:** {status}")
 
-      col1, col2 = st.columns(2)
-      col1.metric("Melhor Quadro - Pontos Validados", f"{inliers} de {total}")
-      col2.metric("Índice de Correlação Máxima", f"{correlacao:.2f}%")
+            col1, col2 = st.columns(2)
+            col1.metric("Pontos Validados (Inliers)", f"{inliers} de {total}")
+            col2.metric("Índice de Correlação", f"{correlacao:.2f}%")
 
 elif not arquivos_originais:
-  st.info(
-      "Por favor, certifique-se de que a pasta **selos_originais** possui ao"
-      " menos uma imagem de referência cadastrada no repositório."
-  )
+    st.info(
+        "Por favor, crie uma pasta chamada **selos_originais** no mesmo diretório do script e coloque ao menos uma foto padrão do selo lá."
+    )
